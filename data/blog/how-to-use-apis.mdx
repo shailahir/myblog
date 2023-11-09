@@ -1,0 +1,297 @@
+---
+title: Unlocking the power of API Refs in Backstage: How to Effectively use APIs in Backstage
+date: '2023-11-09'
+tags: ['']
+draft: false
+summary: Unlocking the power of API Refs in Backstage: How to Effectively use APIs in Backstage
+images: []
+---
+
+In the rapidly evolving landscape of microservices and Platform tools, APIs (Most preferrably REST APIs) are ubuquitous.
+Integrating the APIs in the frontend code can be as simple as writing an axios call or fetch call, but, backstage has even better way of handling the APIs.
+
+In this article, we are going to explore the feature called API Refs in detail.
+Backstage core uses the API Refs extensively to pass around the api instances and take advantage of the dependency injection and centralized code.
+
+Let us see few examples:
+
+```
+DiscoveryApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/DiscoveryApi.ts
+CatalogApi,
+ErrorApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/ErrorApi.ts,
+AlertApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/AlertApi.ts,
+StorageApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/StorageApi.ts
+AnalyticsApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/AnalyticsApi.ts
+AppLanguageApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/AppLanguageApi.ts
+AppThemeApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/AppThemeApi.ts
+ConfigApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/ConfigApi.ts
+FeatureFlagsApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/FeatureFlagsApi.ts
+FetchApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/FetchApi.ts
+IdentityApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/IdentityApi.ts
+OauthRequestApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/OAuthRequestApi.ts
+TranslationApi: https://github.com/backstage/backstage/blob/master/packages/core-plugin-api/src/apis/definitions/TranslationApi.ts
+```
+
+Now by looking at the above examples, we can be sure that the API Refs are essential in backstage.io functionality.
+
+# Anatomy of an API in backstage.io
+
+An API has four main parts in backstage.
+
+1. An API interface or type
+2. An API implementation
+3. An API Ref
+4. An API Factory Registration
+
+Let us discuss in details.
+
+## 1. An API interface/Type:
+
+First of all, An API is declared via an interface, that will have the methods that the API provides to the consumer. These methods define the name and the data types of its input and output.
+The types are also declared in the same file for the inputs and output.
+
+Some people also uses a type instead of an interface but both of them provides similar functionality in typescript.
+
+```
+/**
+ * The alert API is used to report alerts to the app, and display them to the user.
+ *
+ * @public
+ */
+export type AlertApi = {
+  /**
+   * Post an alert for handling by the application.
+   */
+  post(alert: AlertMessage): void;
+
+  /**
+   * Observe alerts posted by other parts of the application.
+   */
+  alert$(): Observable<AlertMessage>;
+};
+```
+
+```
+/**
+ * Message handled by the {@link AlertApi}.
+ *
+ * @public
+ */
+export type AlertMessage = {
+  message: string;
+  // Severity will default to success since that is what material ui defaults the value to.
+  severity?: 'success' | 'info' | 'warning' | 'error';
+  display?: 'permanent' | 'transient';
+};
+```
+
+## 2. The API implementation:
+
+This is the actual implementation of the interface or type that defines the API.
+It can have any sort of implementation imaginable by the developer - use mocks, call external services, call backstage backend, do some local computation and return results etc.
+
+```
+/**
+ * Base implementation for the AlertApi that simply forwards alerts to consumers.
+ *
+ * @public
+ */
+export class AlertApiForwarder implements AlertApi {
+  private readonly subject = new PublishSubject<AlertMessage>();
+
+  post(alert: AlertMessage) {
+    this.subject.next(alert);
+  }
+
+  alert$(): Observable<AlertMessage> {
+    return this.subject;
+  }
+}
+```
+
+https://github.com/backstage/backstage/blob/master/packages/core-app-api/src/apis/implementations/AlertApi/AlertApiForwarder.ts
+
+## 3. An API Ref
+
+Here is the magic begins, So far we have seen a type and its implementation, which is kind of standard in javascript/typescript and nothing fancy yet.
+but in backstage, we can create an api ref for it and use the same api ref in other React components to use the API.
+
+An API Ref is created by using the "createApiRef" method from "core-plugin-api"
+
+> Backstage codebase is iterated very frequently, the createApiRef is currently exported from "core-plugin-api" but it may change, so please check the package If you are looking at this article few months down the line"
+
+```
+/**
+ * The {@link ApiRef} of {@link AlertApi}.
+ *
+ * @public
+ */
+export const alertApiRef: ApiRef<AlertApi> = createApiRef({
+  id: 'core.alert',
+});
+```
+
+We only need to provide a unique id for the api ref.
+
+## 4. API Registration in Api Factory
+
+This is where everything is glued together, the api ref, its implementation are registered in the backstage, so that it can be used in other components.
+
+```
+// apis.ts file
+
+export const apis = [
+    ....
+
+    createApiFactory({
+    api: alertApiRef,
+    deps: {},
+    factory: () => new AlertApiForwarder(),
+  }),
+
+  ....
+]
+```
+
+Example: https://github.com/backstage/backstage/blob/master/packages/app-defaults/src/defaults/apis.ts
+
+An API implementation class can also use other api refs, we can pass the dependencies from the createApiFactory method like this:
+
+For Example:
+
+https://github.com/backstage/backstage/blob/master/packages/core-app-api/src/apis/implementations/auth/google/GoogleAuth.ts
+
+```
+// A class using few other API Refs
+
+/*
+ * Copyright 2020 The Backstage Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { googleAuthApiRef } from '@backstage/core-plugin-api';
+import { OAuth2 } from '../oauth2';
+import { OAuthApiCreateOptions } from '../types';
+
+const DEFAULT_PROVIDER = {
+  id: 'google',
+  title: 'Google',
+  icon: () => null,
+};
+
+const SCOPE_PREFIX = 'https://www.googleapis.com/auth/';
+
+/**
+ * Implements the OAuth flow to Google products.
+ *
+ * @public
+ */
+export default class GoogleAuth {
+  static create(options: OAuthApiCreateOptions): typeof googleAuthApiRef.T {
+    const {
+      configApi,
+      discoveryApi,
+      oauthRequestApi,
+      environment = 'development',
+      provider = DEFAULT_PROVIDER,
+      defaultScopes = [
+        'openid',
+        `${SCOPE_PREFIX}userinfo.email`,
+        `${SCOPE_PREFIX}userinfo.profile`,
+      ],
+    } = options;
+
+    return OAuth2.create({
+      configApi,
+      discoveryApi,
+      oauthRequestApi,
+      provider,
+      environment,
+      defaultScopes,
+      scopeTransform(scopes: string[]) {
+        return scopes.map(scope => {
+          if (scope === 'openid') {
+            return scope;
+          }
+
+          if (scope === 'profile' || scope === 'email') {
+            return `${SCOPE_PREFIX}userinfo.${scope}`;
+          }
+
+          if (scope.startsWith(SCOPE_PREFIX)) {
+            return scope;
+          }
+
+          return `${SCOPE_PREFIX}${scope}`;
+        });
+      },
+    });
+  }
+}
+
+```
+
+```
+// The corresponding API Ref registration in apis.ts
+createApiFactory({
+    api: googleAuthApiRef,
+    deps: {
+      discoveryApi: discoveryApiRef,
+      oauthRequestApi: oauthRequestApiRef,
+      configApi: configApiRef,
+    },
+    factory: ({ discoveryApi, oauthRequestApi, configApi }) =>
+      GoogleAuth.create({
+        configApi,
+        discoveryApi,
+        oauthRequestApi,
+        environment: configApi.getOptionalString('auth.environment'),
+      }),
+  }),
+```
+
+## How to use the API
+
+Now that we have created and registered the API in the apis.ts, we can use the API in any React component by using the "useApi" hook.
+
+Example of "useApi" usage:
+
+** Step 1: Import the apiRef and useApi **
+
+```
+  import { alertApiRef, useApi, useAnalytics } from '@backstage/core-plugin-api';
+
+```
+
+** Step 2: Use the "useApi" to get an instance **
+
+```
+const alertApi = useApi(alertApiRef);
+```
+
+** Step 3: Use its methods **
+
+```
+alertApi.post({
+        message: `Added shortcut '${title}' to your sidebar`,
+        severity: 'success',
+        display: 'transient',
+      });
+```
+
+There are plenty of api refs available in backstage.
+Now you are equiped with this knowledge can better understand the working of the api refs and can create your own api refs for some other API.
+
+Stay Tuned for more!
+Thank you - By shalendra Ahir
